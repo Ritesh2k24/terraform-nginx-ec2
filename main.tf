@@ -1,6 +1,9 @@
-# Fetch latest Ubuntu AMI
+# -----------------------------------
+# Fetch Latest Ubuntu AMI
+# -----------------------------------
 
 data "aws_ami" "ubuntu" {
+
   most_recent = true
 
   owners = ["099720109477"]
@@ -11,25 +14,103 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# -----------------------------------
+# Create VPC
+# -----------------------------------
+
+resource "aws_vpc" "main_vpc" {
+
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "${var.environment}-vpc"
+  }
+}
+
+# -----------------------------------
+# Create Public Subnet
+# -----------------------------------
+
+resource "aws_subnet" "public_subnet" {
+
+  vpc_id                  = aws_vpc.main_vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "ap-south-1a"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "${var.environment}-public-subnet"
+  }
+}
+
+# -----------------------------------
+# Create Internet Gateway
+# -----------------------------------
+
+resource "aws_internet_gateway" "igw" {
+
+  vpc_id = aws_vpc.main_vpc.id
+
+  tags = {
+    Name = "${var.environment}-igw"
+  }
+}
+
+# -----------------------------------
+# Create Route Table
+# -----------------------------------
+
+resource "aws_route_table" "public_rt" {
+
+  vpc_id = aws_vpc.main_vpc.id
+
+  route {
+
+    cidr_block = "0.0.0.0/0"
+
+    gateway_id = aws_internet_gateway.igw.id
+  }
+
+  tags = {
+    Name = "${var.environment}-public-rt"
+  }
+}
+
+# -----------------------------------
+# Associate Route Table with Subnet
+# -----------------------------------
+
+resource "aws_route_table_association" "public_assoc" {
+
+  subnet_id      = aws_subnet.public_subnet.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
+# -----------------------------------
 # Create Security Group
+# -----------------------------------
 
 resource "aws_security_group" "nginx_sg" {
-  name = "${var.environment}-nginx-sg"
+
+  name   = "${var.environment}-nginx-sg"
+  vpc_id = aws_vpc.main_vpc.id
 
   ingress {
+
     description = "HTTP Access"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    from_port = 80
+    to_port   = 80
+    protocol  = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
     description = "SSH Access"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
     # Better to replace with your IP
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -47,14 +128,24 @@ resource "aws_security_group" "nginx_sg" {
   }
 }
 
+# -----------------------------------
 # Create EC2 Instance
+# -----------------------------------
 
 resource "aws_instance" "nginx_server" {
 
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.nginx_sg.id]
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.instance_type
+
+  key_name = var.key_name
+
+  subnet_id = aws_subnet.public_subnet.id
+
+  vpc_security_group_ids = [
+    aws_security_group.nginx_sg.id
+  ]
+
+  associate_public_ip_address = true
 
   user_data = file("userdata.sh")
 
